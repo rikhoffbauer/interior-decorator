@@ -5,8 +5,11 @@ import {
   type AnyNodeId,
   type BuildingNode,
   type CeilingNode,
+  type ChimneyNode,
   type ColumnNode,
   type DoorNode,
+  type DormerNode,
+  type ElevatorNode,
   type FenceNode,
   type ItemNode,
   type RoofNode,
@@ -21,33 +24,30 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { useCallback, useEffect, useState } from 'react'
 import { useIsMobile } from '../../../hooks/use-mobile'
+import { shouldShowEditingControls } from '../../../lib/interaction/overlay-policy'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
-import { CeilingPanel } from './ceiling-panel'
-import { ColumnPanel } from './column-panel'
-import { DoorPanel } from './door-panel'
-import { FencePanel } from './fence-panel'
-import { ItemPanel } from './item-panel'
+import { deleteSelection, duplicateSelectionAndPickUp, startGroupPickUp } from '../../editor/group-actions'
+import { resolveHomogeneousSelection } from './homogeneous-selection'
 import { MobilePanelSheet } from './mobile-panel-sheet'
 import { MobileSelectionBar } from './mobile-selection-bar'
-import { getNodeDisplay } from './node-display'
-import { PaintPanel } from './paint-panel'
+import { MultiParametricInspector } from './multi-parametric-inspector'
+import { MultiSelectionPanel } from './multi-selection-panel'
+import { getNodeDisplay, getTypeDisplay } from './node-display'
+import { resetDesktopInspectorCollapsed } from './panel-wrapper'
+import { ParametricInspector } from './parametric-inspector'
 import { ReferencePanel } from './reference-panel'
-import { RoofPanel } from './roof-panel'
-import { RoofSegmentPanel } from './roof-segment-panel'
-import { SlabPanel } from './slab-panel'
-import { SpawnPanel } from './spawn-panel'
-import { StairPanel } from './stair-panel'
-import { StairSegmentPanel } from './stair-segment-panel'
-import { WallPanel } from './wall-panel'
-import { WindowPanel } from './window-panel'
+import { formatSelectionBreakdown } from './selection-breakdown'
 
 type MovableNode =
   | ItemNode
   | WindowNode
   | DoorNode
+  | ElevatorNode
   | CeilingNode
+  | ChimneyNode
   | ColumnNode
+  | DormerNode
   | SlabNode
   | WallNode
   | FenceNode
@@ -61,8 +61,11 @@ const MOVABLE_TYPES = new Set<string>([
   'item',
   'window',
   'door',
+  'elevator',
   'ceiling',
+  'chimney',
   'column',
+  'dormer',
   'slab',
   'wall',
   'fence',
@@ -77,36 +80,17 @@ function isMovableNode(node: AnyNode | null): node is MovableNode {
   return !!node && MOVABLE_TYPES.has(node.type)
 }
 
-function panelForType(type: string | null) {
+function panelForType(type: string | null, footer?: React.ReactNode) {
   if (!type) return null
-  switch (type) {
-    case 'item':
-      return <ItemPanel />
-    case 'roof':
-      return <RoofPanel />
-    case 'roof-segment':
-      return <RoofSegmentPanel />
-    case 'stair':
-      return <StairPanel />
-    case 'stair-segment':
-      return <StairSegmentPanel />
-    case 'slab':
-      return <SlabPanel />
-    case 'ceiling':
-      return <CeilingPanel />
-    case 'column':
-      return <ColumnPanel />
-    case 'wall':
-      return <WallPanel />
-    case 'fence':
-      return <FencePanel />
-    case 'door':
-      return <DoorPanel />
-    case 'window':
-      return <WindowPanel />
-    default:
-      return null
-  }
+  // Every kind now renders through `<ParametricInspector>`, which either
+  // composes auto-derived editors from `parametrics.groups` or lazy-
+  // loads the kind-owned panel via `parametrics.customPanel`. The
+  // hardcoded switch is gone — all per-kind panel layout lives in
+  // `nodes/src/<kind>/panel.tsx`. The `type` arg is preserved for
+  // future cases where we might want a non-registry fallback (e.g.
+  // reference scale, paint mode); leave the function shape intact.
+  void type
+  return <ParametricInspector footer={footer} />
 }
 
 function MobilePanelLayer({
@@ -190,13 +174,59 @@ function MobilePanelLayer({
   )
 }
 
-export function PanelManager() {
+function MobileMultiPanelLayer({
+  breakdown,
+  panel,
+  type,
+}: {
+  breakdown: string
+  panel: React.ReactNode
+  type: string | null
+}) {
+  const [isSheetOpen, setIsSheetOpen] = useState(false)
+  const display = type ? getTypeDisplay(type) : { icon: '/icons/select.webp', label: 'Selection' }
+  const title = breakdown || display.label
+
+  useEffect(() => {
+    setIsSheetOpen(false)
+  }, [breakdown])
+
+  return (
+    <>
+      <MobileSelectionBar
+        icon={display.icon}
+        label={title}
+        node={null}
+        onDelete={() => deleteSelection()}
+        onDuplicate={() => duplicateSelectionAndPickUp()}
+        onEdit={() => setIsSheetOpen((v) => !v)}
+        onMove={() => startGroupPickUp()}
+      />
+      <MobilePanelSheet
+        icon={display.icon}
+        onClose={() => setIsSheetOpen(false)}
+        open={isSheetOpen}
+        title={title}
+      >
+        {panel}
+      </MobilePanelSheet>
+    </>
+  )
+}
+
+export function PanelManager({
+  inspectorFooter,
+  multiSelectionFooter,
+}: {
+  inspectorFooter?: React.ReactNode
+  multiSelectionFooter?: React.ReactNode
+}) {
   const isMobile = useIsMobile()
   const selectedIds = useViewer((s) => s.selection.selectedIds)
+  const selectedZoneId = useViewer((s) => s.selection.zoneId)
+  const setSelection = useViewer((s) => s.setSelection)
   const selectedReferenceId = useEditor((s) => s.selectedReferenceId)
-  const isPaintPanelOpen = useEditor((s) => s.isPaintPanelOpen)
-  const mode = useEditor((s) => s.mode)
-  const activePaintMaterial = useEditor((s) => s.activePaintMaterial)
+  const readOnly = useScene((s) => s.readOnly)
   // Only subscribe to the *type* of the single-selected node — string primitive
   // so we don't re-render on unrelated scene mutations.
   const selectedNodeType = useScene((s) => {
@@ -209,10 +239,56 @@ export function PanelManager() {
     const id = selectedIds[0]
     return id ? (s.nodes[id as AnyNodeId] ?? null) : null
   })
+  const homogeneousType = useScene((s) =>
+    selectedIds.length > 1 ? resolveHomogeneousSelection(selectedIds, s.nodes) : null,
+  )
+  const multiBreakdown = useScene((s) =>
+    selectedIds.length > 1
+      ? formatSelectionBreakdown(selectedIds.map((id) => s.nodes[id as AnyNodeId]?.type))
+      : '',
+  )
+
+  // Node and reference selection are mutually exclusive: selecting a guide
+  // clears the node selection (handleGuideSelect), but node selection never
+  // cleared a lingering reference — so clicking a wall with a floorplan
+  // selected kept showing the reference panel. Clear the stale reference the
+  // moment a scene selection appears.
+  const setSelectedReferenceId = useEditor((s) => s.setSelectedReferenceId)
+  useEffect(() => {
+    if (selectedIds.length > 0 || selectedZoneId) {
+      setSelectedReferenceId(null)
+    }
+  }, [selectedIds, selectedZoneId, setSelectedReferenceId])
+
+  // The inspector's expanded state is shared across panel swaps, but a fresh
+  // selection after everything was deselected should open collapsed again.
+  const hasAnySelection = selectedIds.length > 0 || Boolean(selectedZoneId) || Boolean(selectedReferenceId)
+  useEffect(() => {
+    if (!hasAnySelection) {
+      resetDesktopInspectorCollapsed()
+    }
+  }, [hasAnySelection])
+
+  if (!shouldShowEditingControls(readOnly)) return null
 
   if (isMobile) {
     if (selectedReferenceId) {
       return <MobilePanelLayer isReference={true} node={null} panel={<ReferencePanel />} />
+    }
+    if (selectedIds.length > 1) {
+      return (
+        <MobileMultiPanelLayer
+          breakdown={multiBreakdown}
+          panel={
+            homogeneousType ? (
+              <MultiParametricInspector footer={multiSelectionFooter} />
+            ) : (
+              <MultiSelectionPanel footer={multiSelectionFooter} />
+            )
+          }
+          type={homogeneousType}
+        />
+      )
     }
     return (
       <MobilePanelLayer
@@ -228,46 +304,25 @@ export function PanelManager() {
     return <ReferencePanel />
   }
 
-  if (
-    isPaintPanelOpen &&
-    mode === 'material-paint' &&
-    activePaintMaterial?.material?.properties &&
-    !activePaintMaterial.materialPreset
-  ) {
-    return <PaintPanel />
+  if (selectedZoneId && selectedIds.length === 0) {
+    return (
+      <ParametricInspector
+        footer={inspectorFooter}
+        key={selectedZoneId}
+        nodeId={selectedZoneId as AnyNodeId}
+        onClose={() => setSelection({ zoneId: null })}
+      />
+    )
   }
 
-  // Show appropriate panel based on selected node type
-  if (selectedNodeType) {
-    switch (selectedNodeType) {
-      case 'item':
-        return <ItemPanel />
-      case 'roof':
-        return <RoofPanel />
-      case 'roof-segment':
-        return <RoofSegmentPanel />
-      case 'stair':
-        return <StairPanel />
-      case 'stair-segment':
-        return <StairSegmentPanel />
-      case 'slab':
-        return <SlabPanel />
-      case 'spawn':
-        return <SpawnPanel />
-      case 'ceiling':
-        return <CeilingPanel />
-      case 'column':
-        return <ColumnPanel />
-      case 'wall':
-        return <WallPanel />
-      case 'fence':
-        return <FencePanel />
-      case 'door':
-        return <DoorPanel />
-      case 'window':
-        return <WindowPanel />
+  // Multi-selection: parametric inspector when every resolved id shares a type,
+  // otherwise the actions-only panel. Mobile uses the same panels in a sheet.
+  if (selectedIds.length > 1) {
+    if (homogeneousType) {
+      return <MultiParametricInspector footer={multiSelectionFooter} />
     }
+    return <MultiSelectionPanel footer={multiSelectionFooter} />
   }
 
-  return null
+  return panelForType(selectedNodeType, inspectorFooter)
 }

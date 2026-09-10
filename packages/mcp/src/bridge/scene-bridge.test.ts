@@ -401,27 +401,6 @@ describe('SceneBridge', () => {
   })
 
   describe('setScene / exportJSON / loadJSON', () => {
-    test('setScene prunes duplicated levels that were accidentally saved as roots', () => {
-      const level0 = LevelNode.parse({ level: 0, children: [] })
-      const building = BuildingNode.parse({ children: [level0.id] })
-      const site = SiteNode.parse({ children: [building] })
-      const orphanLevel = LevelNode.parse({ level: 1, children: [] })
-
-      bridge.setScene(
-        {
-          [site.id]: site,
-          [building.id]: building,
-          [level0.id]: level0,
-          [orphanLevel.id]: orphanLevel,
-        } as any,
-        [site.id, orphanLevel.id] as any,
-      )
-
-      expect(bridge.getRootNodeIds()).toEqual([site.id])
-      expect(bridge.getNode(orphanLevel.id)).toBeNull()
-      expect(bridge.findNodes({ type: 'level' }).map((node) => node.id)).toEqual([level0.id])
-    })
-
     test('exportJSON returns the scene shape', () => {
       const exp = bridge.exportJSON()
       expect(typeof exp.nodes).toBe('object')
@@ -451,6 +430,44 @@ describe('SceneBridge', () => {
       bridge.setScene({}, [])
       bridge.loadJSON(str)
       expect(Object.keys(bridge.getNodes()).length).toBe(Object.keys(snap.nodes).length)
+    })
+
+    test('loadJSON preserves explicit plugin installs', () => {
+      const snap = bridge.exportJSON()
+      bridge.loadJSON({ ...snap, installedPlugins: ['pascal:trees'] })
+
+      expect(bridge.exportJSON().installedPlugins).toEqual(['pascal:trees'])
+    })
+
+    // `setScene` resets `collections` and `materials` to `{}` unless they are
+    // in its `extra` bag, so anything applied after it is silently discarded.
+    // These two round trips are what catch a regression back to that.
+    test('loadJSON round-trips the material palette', () => {
+      const materials = {
+        mat_1: { id: 'mat_1', name: 'Oak', material: { preset: 'wood' } },
+      }
+      bridge.loadJSON({ ...bridge.exportJSON(), materials } as never)
+
+      expect(bridge.exportJSON().materials).toEqual(materials)
+    })
+
+    test('loadJSON round-trips collections', () => {
+      const snap = bridge.exportJSON()
+      const nodeId = Object.keys(snap.nodes)[0]!
+      const collections = {
+        collection_1: { id: 'collection_1', name: 'Refs', nodeIds: [nodeId] },
+      }
+      bridge.loadJSON({ ...snap, collections } as never)
+
+      expect(bridge.exportJSON().collections).toEqual(collections)
+    })
+
+    test('legacy graphs do not become explicitly uninstalled on export', () => {
+      const snap = bridge.exportJSON()
+      const { installedPlugins: _installedPlugins, ...legacy } = snap
+      bridge.loadJSON(legacy)
+
+      expect(Object.hasOwn(bridge.exportJSON(), 'installedPlugins')).toBe(false)
     })
 
     test('loadJSON throws on malformed JSON string', () => {

@@ -3,8 +3,9 @@ import type { AnyNode, AnyNodeId } from '@pascal-app/core/schema'
 import { z } from 'zod'
 import type { Patch as BridgePatch } from '../bridge/scene-bridge'
 import type { SceneOperations } from '../operations'
+import { DESTRUCTIVE_TOOL_ANNOTATIONS } from './annotations'
 import { ErrorCode, throwMcpError } from './errors'
-import { publishLiveSceneSnapshot } from './live-sync'
+import { liveSyncOutput, persistencePayload, publishLiveSceneSnapshot } from './live-sync'
 import { PatchSchema } from './schemas'
 
 export const applyPatchInput = {
@@ -15,6 +16,7 @@ export const applyPatchOutput = {
   appliedOps: z.number(),
   deletedIds: z.array(z.string()),
   createdIds: z.array(z.string()),
+  ...liveSyncOutput,
 }
 
 export function registerApplyPatch(server: McpServer, bridge: SceneOperations): void {
@@ -26,6 +28,7 @@ export function registerApplyPatch(server: McpServer, bridge: SceneOperations): 
         'Apply a batch of create/update/delete operations atomically. All patches are validated before any are applied; the entire batch forms a single undo step.',
       inputSchema: applyPatchInput,
       outputSchema: applyPatchOutput,
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
     async ({ patches }) => {
       const bridgePatches: BridgePatch[] = patches.map((p) => {
@@ -52,11 +55,12 @@ export function registerApplyPatch(server: McpServer, bridge: SceneOperations): 
 
       try {
         const result = bridge.applyPatch(bridgePatches)
-        await publishLiveSceneSnapshot(bridge, 'apply_patch')
+        const persistence = await publishLiveSceneSnapshot(bridge, 'apply_patch')
         const payload = {
           appliedOps: result.appliedOps,
           deletedIds: result.deletedIds as unknown as string[],
           createdIds: result.createdIds as unknown as string[],
+          ...persistencePayload(persistence),
         }
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(payload) }],

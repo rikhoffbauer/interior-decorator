@@ -83,8 +83,20 @@ function getNormalizedFloorplanStairSweepAngle(stair: StairNode) {
   return baseSweepAngle
 }
 
+function clampFloorplanCircularSweepAngle(sweepAngle: number) {
+  if (Math.abs(sweepAngle) >= Math.PI * 2) {
+    return Math.sign(sweepAngle || 1) * (Math.PI * 2 - 0.001)
+  }
+
+  return sweepAngle
+}
+
 function getFloorplanStairStepCount(stair: StairNode, minimum: number) {
   return Math.max(minimum, Math.round(stair.stepCount ?? 10))
+}
+
+function getFloorplanStairBreakStep(stepCount: number) {
+  return Math.max(1, Math.ceil(Math.max(1, Math.round(stepCount)) * 0.68))
 }
 
 function getFloorplanSpiralLandingSweep(stair: StairNode, sweepAngle: number) {
@@ -139,7 +151,10 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
         const sectorStartAngle = -stair.rotation - normalizedSweepAngle / 2
         const sectorEndAngle = sectorStartAngle + normalizedSweepAngle
         const spiralLandingSweep = getFloorplanSpiralLandingSweep(stair, normalizedSweepAngle)
-        const visualSectorEndAngle = sectorEndAngle + spiralLandingSweep
+        const visualSweepAngle = clampFloorplanCircularSweepAngle(
+          normalizedSweepAngle + spiralLandingSweep,
+        )
+        const visualSectorEndAngle = sectorStartAngle + visualSweepAngle
         const stairCenter = {
           x: stair.position[0],
           y: stair.position[2],
@@ -233,14 +248,15 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                 const angle = sectorStartAngle + stepSweep * index
                 const innerPoint = getArcPlanPoint(stairCenter, innerRadius, angle)
                 const outerPoint = getArcPlanPoint(stairCenter, outerRadius, angle)
-                const dashedFromIndex = Math.floor(stepCount * 0.68)
+                if (index >= getFloorplanStairBreakStep(stepCount) && index !== stepCount) {
+                  return null
+                }
 
                 return (
                   <line
                     key={`${stair.id}:spiral-step:${index}`}
                     pointerEvents="none"
                     stroke={index === stepCount ? curvedAccent : curvedStroke}
-                    strokeDasharray={index >= dashedFromIndex ? '0.1 0.08' : undefined}
                     strokeWidth={index === stepCount ? '1.8' : '1.15'}
                     vectorEffect="non-scaling-stroke"
                     x1={toSvgX(innerPoint.x)}
@@ -273,10 +289,12 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                     fill={curvedAccent}
                     key={`${stair.id}:spiral-arrow`}
                     pointerEvents="none"
-                    points={buildSvgArrowHeadPoints(
-                      arrowPoint,
-                      tangentAngle,
-                      clamp(stair.width * 0.18, 0.12, 0.18),
+                    points={formatSvgPolygonPoints(
+                      buildSvgArrowHeadPoints(
+                        arrowPoint,
+                        tangentAngle,
+                        clamp(stair.width * 0.18, 0.12, 0.18),
+                      ),
                     )}
                   />
                 )
@@ -317,6 +335,9 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                 const angle = sectorStartAngle + stepSweep * index
                 const innerPoint = getArcPlanPoint(stairCenter, innerRadius, angle)
                 const outerPoint = getArcPlanPoint(stairCenter, outerRadius, angle)
+                if (index >= getFloorplanStairBreakStep(stepCount) && index !== stepCount) {
+                  return null
+                }
 
                 return (
                   <line
@@ -361,10 +382,12 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                     fill={curvedAccent}
                     key={`${stair.id}:curved-arrow`}
                     pointerEvents="none"
-                    points={buildSvgArrowHeadPoints(
-                      arrowPoint,
-                      tangentAngle,
-                      clamp(stair.width * 0.16, 0.1, 0.16),
+                    points={formatSvgPolygonPoints(
+                      buildSvgArrowHeadPoints(
+                        arrowPoint,
+                        tangentAngle,
+                        clamp(stair.width * 0.16, 0.1, 0.16),
+                      ),
                     )}
                   />
                 )
@@ -382,22 +405,24 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                     strokeWidth={isSelectionActive ? '2' : '1.35'}
                     vectorEffect="non-scaling-stroke"
                   />
-                  {treadBars.map((treadBar, treadIndex) => (
-                    <polygon
-                      fill={straightTread}
-                      key={`${segment.id}:tread:${treadIndex}`}
-                      pointerEvents="none"
-                      points={segment.segmentType === 'landing' ? '' : treadBar.points}
-                    />
-                  ))}
+                  {treadBars
+                    .slice(0, Math.max(0, getFloorplanStairBreakStep(segment.stepCount) - 1))
+                    .map((treadBar, treadIndex) => (
+                      <polygon
+                        fill={straightTread}
+                        key={`${segment.id}:tread:${treadIndex}`}
+                        pointerEvents="none"
+                        points={segment.segmentType === 'landing' ? '' : treadBar.points}
+                      />
+                    ))}
                 </g>
               ))}
               {arrow?.polyline && arrow.polyline.length >= 2 ? (
                 <>
                   <polyline
                     fill="none"
-                    points={formatSvgPolygonPoints(arrow.polyline)}
                     pointerEvents="none"
+                    points={formatSvgPolygonPoints(arrow.polyline)}
                     stroke={straightAccent}
                     strokeWidth="1.15"
                     vectorEffect="non-scaling-stroke"
@@ -411,8 +436,8 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                   />
                   <polygon
                     fill={straightAccent}
-                    points={formatSvgPolygonPoints(arrow.head)}
                     pointerEvents="none"
+                    points={formatSvgPolygonPoints(arrow.head)}
                   />
                 </>
               ) : null}
@@ -438,8 +463,6 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                   }
                 : undefined
             }
-            onPointerEnter={canSelectStairs ? () => onStairHoverEnter(stair.id) : undefined}
-            onPointerLeave={canSelectStairs ? () => onStairHoverChange(null) : undefined}
             onPointerDown={
               canFocusStairs && stairSelected
                 ? (event) => {
@@ -449,6 +472,8 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
                   }
                 : undefined
             }
+            onPointerEnter={canSelectStairs ? () => onStairHoverEnter(stair.id) : undefined}
+            onPointerLeave={canSelectStairs ? () => onStairHoverChange(null) : undefined}
             pointerEvents={canSelectStairs ? undefined : 'none'}
             style={canSelectStairs ? { cursor } : undefined}
           >
@@ -456,8 +481,8 @@ export const FloorplanStairLayer = memo(function FloorplanStairLayer({
               <polygon
                 fill="transparent"
                 key={`${stair.id}:hit:${polygonIndex}`}
-                points={formatSvgPolygonPoints(polygon)}
                 pointerEvents={canSelectStairs ? 'all' : 'none'}
+                points={formatSvgPolygonPoints(polygon)}
                 stroke="transparent"
                 strokeLinejoin="round"
                 strokeWidth={hitStrokeWidth}

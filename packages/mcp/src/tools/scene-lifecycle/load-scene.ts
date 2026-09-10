@@ -1,7 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import type { SceneOperations } from '../../operations'
+import { DESTRUCTIVE_TOOL_ANNOTATIONS } from '../annotations'
 import { ErrorCode, throwMcpError } from '../errors'
+import { currentLevelContext, sceneMetaPayload } from './metadata'
 
 export const loadSceneInput = {
   id: z.string().min(1).max(64),
@@ -18,6 +20,14 @@ export const loadSceneOutput = {
   ownerId: z.string().nullable(),
   sizeBytes: z.number(),
   nodeCount: z.number(),
+  url: z.string(),
+  editorUrl: z.string(),
+  published: z.boolean(),
+  isDraft: z.boolean(),
+  saveMode: z.enum(['draft', 'checkpoint']),
+  graphHash: z.string().optional(),
+  levelIds: z.array(z.string()),
+  defaultLevelId: z.string().nullable(),
 }
 
 export function registerLoadScene(server: McpServer, bridge: SceneOperations): void {
@@ -29,6 +39,7 @@ export function registerLoadScene(server: McpServer, bridge: SceneOperations): v
         'Load a scene from the SceneStore into the bridge. Returns the scene metadata. Throws `scene_not_found` if the id does not exist.',
       inputSchema: loadSceneInput,
       outputSchema: loadSceneOutput,
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
     async ({ id }) => {
       const result = await bridge.loadStoredScene(id)
@@ -43,16 +54,8 @@ export function registerLoadScene(server: McpServer, bridge: SceneOperations): v
         throwMcpError(ErrorCode.InvalidRequest, `load_failed: ${msg}`, { id })
       }
       const payload = {
-        id: result.id,
-        name: result.name,
-        projectId: result.projectId,
-        thumbnailUrl: result.thumbnailUrl,
-        version: result.version,
-        createdAt: result.createdAt,
-        updatedAt: result.updatedAt,
-        ownerId: result.ownerId,
-        sizeBytes: result.sizeBytes,
-        nodeCount: result.nodeCount,
+        ...sceneMetaPayload(result, result.graph),
+        ...currentLevelContext(bridge),
       }
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(payload) }],

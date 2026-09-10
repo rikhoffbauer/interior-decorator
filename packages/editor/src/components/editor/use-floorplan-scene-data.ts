@@ -12,6 +12,7 @@ import {
   type SiteNode,
   type SlabNode,
   type SpawnNode,
+  useLiveTransforms,
   useScene,
   type WallNode,
   type WindowNode,
@@ -35,7 +36,7 @@ function useLevelChildren<TNode extends AnyNode>(
       }
 
       const levelNode = state.nodes[levelId]
-      if (!levelNode || levelNode.type !== 'level') {
+      if (levelNode?.type !== 'level') {
         return [] as TNode[]
       }
 
@@ -59,13 +60,22 @@ export function useFloorplanSceneData({
       ? (levelNode.parentId as BuildingNode['id'])
       : buildingId
 
-  const buildingRotationY = useScene((state) => {
+  // Live transform override — when the building is mid-drag (the move
+  // tool publishes per-frame pose to useLiveTransforms), the floor-plan
+  // follows that pose so the dimmed reference floor tracks the cursor
+  // instead of snapping only on commit.
+  const buildingLiveTransform = useLiveTransforms((state) =>
+    currentBuildingId ? state.transforms.get(currentBuildingId) : undefined,
+  )
+
+  const committedBuildingRotationY = useScene((state) => {
     if (!currentBuildingId) return 0
     const node = state.nodes[currentBuildingId]
     return node?.type === 'building' ? (node.rotation[1] ?? 0) : 0
   })
+  const buildingRotationY = buildingLiveTransform?.rotation ?? committedBuildingRotationY
 
-  const buildingPosition = useScene((state) => {
+  const committedBuildingPosition = useScene((state) => {
     if (!currentBuildingId) {
       return DEFAULT_BUILDING_POSITION
     }
@@ -75,6 +85,7 @@ export function useFloorplanSceneData({
       ? (node.position as [number, number, number])
       : DEFAULT_BUILDING_POSITION
   })
+  const buildingPosition = buildingLiveTransform?.position ?? committedBuildingPosition
 
   const site = useScene((state) => {
     for (const rootNodeId of state.rootNodeIds) {
@@ -94,7 +105,7 @@ export function useFloorplanSceneData({
       }
 
       const buildingNode = state.nodes[currentBuildingId]
-      if (!buildingNode || buildingNode.type !== 'building') {
+      if (buildingNode?.type !== 'building') {
         return [] as LevelNode[]
       }
 
@@ -122,7 +133,7 @@ export function useFloorplanSceneData({
       }
 
       const nextLevelNode = state.nodes[levelId]
-      if (!nextLevelNode || nextLevelNode.type !== 'level') {
+      if (nextLevelNode?.type !== 'level') {
         return [] as RoofNode[]
       }
 
@@ -138,7 +149,7 @@ export function useFloorplanSceneData({
       }
 
       const nextLevelNode = state.nodes[levelId]
-      if (!nextLevelNode || nextLevelNode.type !== 'level') {
+      if (nextLevelNode?.type !== 'level') {
         return [] as OpeningNode[]
       }
 
@@ -160,7 +171,7 @@ export function useFloorplanSceneData({
       }
 
       const nextLevelNode = state.nodes[levelId]
-      if (!nextLevelNode || nextLevelNode.type !== 'level') {
+      if (nextLevelNode?.type !== 'level') {
         return [] as AnyNode[]
       }
 
@@ -170,6 +181,7 @@ export function useFloorplanSceneData({
 
   return {
     buildingPosition,
+    committedBuildingPosition,
     buildingRotationY,
     currentBuildingId,
     ceilings,

@@ -5,8 +5,10 @@ import { z } from 'zod'
 import { rehydrateSiteChildren } from '../../lib/rehydrate-site-children'
 import type { SceneOperations } from '../../operations'
 import { isTemplateId, TEMPLATES, type TemplateId } from '../../templates'
+import { DESTRUCTIVE_TOOL_ANNOTATIONS } from '../annotations'
 import { ErrorCode, throwMcpError } from '../errors'
 import { appendLiveSceneEvent } from '../live-sync'
+import { currentLevelContext, sceneMetaPayload } from '../scene-lifecycle/metadata'
 
 export const createFromTemplateInput = {
   id: z
@@ -34,6 +36,8 @@ export const createFromTemplateOutput = {
   templateId: z.string(),
   rootNodeIds: z.array(z.string()),
   nodeCount: z.number(),
+  /** Present when `save: true` was requested but no store was attached. */
+  saveSkipped: z.boolean().optional(),
   /** Present when `save: true` (and a store was available). */
   scene: z
     .object({
@@ -48,6 +52,13 @@ export const createFromTemplateOutput = {
       sizeBytes: z.number(),
       nodeCount: z.number(),
       url: z.string(),
+      editorUrl: z.string(),
+      published: z.boolean(),
+      isDraft: z.boolean(),
+      saveMode: z.enum(['draft', 'checkpoint']),
+      graphHash: z.string().optional(),
+      levelIds: z.array(z.string()),
+      defaultLevelId: z.string().nullable(),
     })
     .optional(),
 }
@@ -69,6 +80,7 @@ export function registerCreateFromTemplate(server: McpServer, bridge: SceneOpera
         'Instantiate a seed Pascal scene template into the bridge. Regenerates all ids before applying. When `save: true` and a SceneStore is wired, also persists the new scene and returns the SceneMeta.',
       inputSchema: createFromTemplateInput,
       outputSchema: createFromTemplateOutput,
+      annotations: DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
     async ({ id, name, save, projectId }) => {
       if (!isTemplateId(id)) {
@@ -121,10 +133,18 @@ export function registerCreateFromTemplate(server: McpServer, bridge: SceneOpera
       }
 
       try {
+        let saveProjectId = projectId
+        if (!saveProjectId && bridge.canCreateProject) {
+          const project = await bridge.createProject({ name: name ?? entry.name })
+          saveProjectId = project.projectId
+        }
         const meta = await bridge.saveScene({
+          ...(saveProjectId !== undefined ? { id: saveProjectId, projectId: saveProjectId } : {}),
           name: name ?? entry.name,
-          ...(projectId !== undefined ? { projectId } : {}),
           graph: { nodes, rootNodeIds },
+          saveMode: 'draft',
+          publish: false,
+          operation: 'create_from_template',
         })
         bridge.setActiveScene(meta)
         await appendLiveSceneEvent(bridge, meta.id, meta.version, 'create_from_template', {
@@ -132,17 +152,8 @@ export function registerCreateFromTemplate(server: McpServer, bridge: SceneOpera
           rootNodeIds,
         })
         const scene = {
-          id: meta.id,
-          name: meta.name,
-          projectId: meta.projectId,
-          thumbnailUrl: meta.thumbnailUrl,
-          version: meta.version,
-          createdAt: meta.createdAt,
-          updatedAt: meta.updatedAt,
-          ownerId: meta.ownerId,
-          sizeBytes: meta.sizeBytes,
-          nodeCount: meta.nodeCount,
-          url: `/scene/${meta.id}`,
+          ...sceneMetaPayload(meta, { nodes, rootNodeIds }),
+          ...currentLevelContext(bridge),
         }
         const payload = { ...basePayload, scene }
         return {

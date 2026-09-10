@@ -9,25 +9,22 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { Check, ChevronDown, Eye, EyeOff, Layers2, Plus, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, Eye, EyeOff, Layers2, Plus, Trash2, Waypoints } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { getLevelDisplayName } from '@pascal-app/core'
 import { createLocalGuideImage } from '../../../lib/local-guide-image'
 import { cn } from '../../../lib/utils'
-import useEditor, { type GridSnapStep } from '../../../store/use-editor'
+import useEditor from '../../../store/use-editor'
 import { useUploadStore } from '../../../store/use-upload'
 import { SliderControl } from '../controls/slider-control'
 import { Popover, PopoverContent, PopoverTrigger } from '../primitives/popover'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../primitives/tooltip'
 import { ActionButton } from './action-button'
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024 // 200MB
 const ACCEPTED_FILE_TYPES = '.glb,.gltf,image/jpeg,image/png,image/webp,image/gif'
-const GRID_SNAP_STEPS: GridSnapStep[] = [0.5, 0.25, 0.1, 0.05]
-
-function formatGridSnapStep(step: GridSnapStep) {
-  return step.toFixed(2)
-}
+const REFERENCES_EMPTY_TEXT =
+  'Upload GLB meshes as scan references or blueprint images as guide references.'
 
 // ── Helper: get guide images for the current level ──────────────────────────
 
@@ -81,10 +78,6 @@ function useLowerReferenceLevels(): LevelNode[] {
         .sort((a, b) => b.level - a.level)
     }),
   )
-}
-
-function getLevelDisplayName(level: LevelNode) {
-  return level.name || `Level ${level.level}`
 }
 
 // ── Shared upload button for dropdowns ──────────────────────────────────────
@@ -226,7 +219,7 @@ function GuidesControl() {
             <img
               alt="Guides"
               className="h-[28px] w-[28px] object-contain"
-              src="/icons/floorplan.png"
+              src="/icons/floorplan.webp"
             />
             <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-white/20 px-[3px] text-center font-medium text-[9px] text-white/70 leading-[14px]">
               {guides.length}
@@ -258,14 +251,14 @@ function GuidesControl() {
 
       <PopoverContent
         align="center"
-        className="w-72 rounded-xl border-border/45 bg-background/96 p-3 shadow-[0_14px_28px_-18px_rgba(15,23,42,0.55),0_6px_16px_-10px_rgba(15,23,42,0.2)] backdrop-blur-xl"
+        className="w-72 rounded-xl border-border/45 bg-background/96 p-3 shadow-elevation-3 backdrop-blur-xl"
         side="top"
         sideOffset={14}
       >
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background/80">
-              <img alt="" className="h-4 w-4 object-contain" src="/icons/floorplan.png" />
+              <img alt="" className="h-4 w-4 object-contain" src="/icons/floorplan.webp" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="font-medium text-foreground text-sm">Guide images</p>
@@ -305,7 +298,7 @@ function GuidesControl() {
                       <img
                         alt=""
                         className="h-3.5 w-3.5 shrink-0 object-contain opacity-70"
-                        src="/icons/floorplan.png"
+                        src="/icons/floorplan.webp"
                       />
                       <p className="truncate font-medium text-foreground text-sm">
                         {guide.name || `Guide image ${index + 1}`}
@@ -344,86 +337,9 @@ function GuidesControl() {
             </div>
           ) : (
             <div className="rounded-xl border border-border/45 border-dashed bg-background/60 px-3 py-4 text-muted-foreground text-sm">
-              No guide images on this level yet.
+              {REFERENCES_EMPTY_TEXT}
             </div>
           )}
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-// ── Grid snap ──────────────────────────────────────────────────────────────
-
-export function GridSnapControl() {
-  const [isOpen, setIsOpen] = useState(false)
-  const gridSnapStep = useEditor((state) => state.gridSnapStep)
-  const setGridSnapStep = useEditor((state) => state.setGridSnapStep)
-
-  return (
-    <Popover onOpenChange={setIsOpen} open={isOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <button
-              aria-expanded={isOpen}
-              aria-label={`Grid snap: ${formatGridSnapStep(gridSnapStep)}`}
-              className={cn(
-                'flex h-11 w-11 flex-col items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-white/5 hover:text-foreground',
-                isOpen && 'bg-white/10 text-foreground',
-              )}
-              type="button"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M3 3h7v7H3V3zm11 0h7v7h-7V3zm0 11h7v7h-7v-7zm-11 0h7v7H3v-7z"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span className="mt-1 font-medium text-[9px] leading-none">
-                {formatGridSnapStep(gridSnapStep)}
-              </span>
-            </button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="top">Grid snap: {formatGridSnapStep(gridSnapStep)}</TooltipContent>
-      </Tooltip>
-
-      <PopoverContent
-        align="center"
-        className="w-36 rounded-xl border-border/45 bg-background/96 p-2 shadow-elevation-3 backdrop-blur-xl"
-        side="top"
-        sideOffset={14}
-      >
-        <div className="space-y-1">
-          {GRID_SNAP_STEPS.map((step) => {
-            const isActive = step === gridSnapStep
-            return (
-              <button
-                className={cn(
-                  'flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/8',
-                  isActive && 'bg-white/10 text-foreground',
-                )}
-                key={step}
-                onClick={() => {
-                  setGridSnapStep(step)
-                  setIsOpen(false)
-                }}
-                type="button"
-              >
-                <span>{formatGridSnapStep(step)}</span>
-                {isActive ? <Check className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5" />}
-              </button>
-            )
-          })}
         </div>
       </PopoverContent>
     </Popover>
@@ -479,7 +395,7 @@ function ScansControl() {
           variant="ghost"
         >
           <div className="relative">
-            <img alt="Scans" className="h-[28px] w-[28px] object-contain" src="/icons/mesh.png" />
+            <img alt="Scans" className="h-[28px] w-[28px] object-contain" src="/icons/mesh.webp" />
             <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-white/20 px-[3px] text-center font-medium text-[9px] text-white/70 leading-[14px]">
               {scans.length}
             </span>
@@ -510,14 +426,14 @@ function ScansControl() {
 
       <PopoverContent
         align="center"
-        className="w-72 rounded-xl border-border/45 bg-background/96 p-3 shadow-[0_14px_28px_-18px_rgba(15,23,42,0.55),0_6px_16px_-10px_rgba(15,23,42,0.2)] backdrop-blur-xl"
+        className="w-72 rounded-xl border-border/45 bg-background/96 p-3 shadow-elevation-3 backdrop-blur-xl"
         side="top"
         sideOffset={14}
       >
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background/80">
-              <img alt="" className="h-4 w-4 object-contain" src="/icons/mesh.png" />
+              <img alt="" className="h-4 w-4 object-contain" src="/icons/mesh.webp" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="font-medium text-foreground text-sm">Scans</p>
@@ -557,7 +473,7 @@ function ScansControl() {
                       <img
                         alt=""
                         className="h-3.5 w-3.5 shrink-0 object-contain opacity-70"
-                        src="/icons/mesh.png"
+                        src="/icons/mesh.webp"
                       />
                       <p className="truncate font-medium text-foreground text-sm">
                         {scan.name || `Scan ${index + 1}`}
@@ -596,7 +512,7 @@ function ScansControl() {
             </div>
           ) : (
             <div className="rounded-xl border border-border/45 border-dashed bg-background/60 px-3 py-4 text-muted-foreground text-sm">
-              No scans on this level yet.
+              {REFERENCES_EMPTY_TEXT}
             </div>
           )}
         </div>
@@ -604,6 +520,249 @@ function ScansControl() {
     </Popover>
   )
 }
+
+// ── References (merged scans + guides) ──────────────────────────────────────
+// Bottom-bar control that folds the separate Scans and Guides toggles into one
+// "References" split button + a popover holding both, each with its own
+// visibility toggle, upload, and per-item opacity/delete.
+
+function ReferenceListSection({
+  title,
+  iconSrc,
+  noun,
+  emptyText,
+  nodes,
+  show,
+  setShow,
+  onError,
+}: {
+  title: string
+  iconSrc: string
+  noun: string
+  emptyText: string
+  nodes: (GuideNode | ScanNode)[]
+  show: boolean
+  setShow: (show: boolean) => void
+  onError: (message: string | null) => void
+}) {
+  const setSelection = useViewer((state) => state.setSelection)
+  const updateNode = useScene((state) => state.updateNode)
+  const deleteNode = useScene((state) => state.deleteNode)
+  const selectedReferenceId = useEditor((state) => state.selectedReferenceId)
+  const setSelectedReferenceId = useEditor((state) => state.setSelectedReferenceId)
+  const hasItems = nodes.length > 0
+
+  const handleSelect = useCallback(
+    (id: AnyNodeId) => {
+      setShow(true)
+      setSelectedReferenceId(id)
+      setSelection({ selectedIds: [], zoneId: null })
+    },
+    [setShow, setSelectedReferenceId, setSelection],
+  )
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background/80">
+          <img alt="" className="h-4 w-4 object-contain" src={iconSrc} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-foreground text-sm">{title}</p>
+          {hasItems && (
+            <p className="text-muted-foreground text-xs">
+              {nodes.length} {noun}
+              {nodes.length !== 1 ? 's' : ''} on this level
+            </p>
+          )}
+        </div>
+        <button
+          aria-label={show ? `Hide ${title.toLowerCase()}` : `Show ${title.toLowerCase()}`}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border/40 text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          onClick={() => setShow(!show)}
+          type="button"
+        >
+          {show ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+        </button>
+        <UploadButton onError={onError} />
+      </div>
+
+      {hasItems ? (
+        <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+          {nodes.map((node, index) => (
+            <div
+              className={cn(
+                'group/item space-y-2 rounded-xl border bg-background/75 p-2.5 transition-colors',
+                selectedReferenceId === node.id
+                  ? 'border-foreground/35 bg-white/10'
+                  : 'border-border/45',
+              )}
+              key={node.id}
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  onClick={() => handleSelect(node.id)}
+                  type="button"
+                >
+                  <img
+                    alt=""
+                    className="h-3.5 w-3.5 shrink-0 object-contain opacity-70"
+                    src={iconSrc}
+                  />
+                  <p className="truncate font-medium text-foreground text-sm">
+                    {node.name || `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${index + 1}`}
+                  </p>
+                  {selectedReferenceId === node.id && (
+                    <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-foreground/80" />
+                  )}
+                </button>
+                <button
+                  aria-label={`Delete ${noun}`}
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover/item:opacity-100"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    deleteNode(node.id)
+                    if (selectedReferenceId === node.id) {
+                      setSelectedReferenceId(null)
+                    }
+                  }}
+                  type="button"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+              <SliderControl
+                label="Opacity"
+                max={100}
+                min={0}
+                onChange={(value) =>
+                  updateNode(node.id, { opacity: Math.round(Math.min(100, Math.max(0, value))) })
+                }
+                precision={0}
+                step={1}
+                unit="%"
+                value={node.opacity}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border/45 border-dashed bg-background/60 px-3 py-3 text-muted-foreground text-sm">
+          {emptyText}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReferencesControl() {
+  const showScans = useViewer((state) => state.showScans)
+  const setShowScans = useViewer((state) => state.setShowScans)
+  const showGuides = useViewer((state) => state.showGuides)
+  const setShowGuides = useViewer((state) => state.setShowGuides)
+  const [isOpen, setIsOpen] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  const scans = useLevelScans()
+  const guides = useLevelGuides()
+  const total = scans.length + guides.length
+  const anyVisible = showScans || showGuides
+
+  const toggleAll = useCallback(() => {
+    const next = !anyVisible
+    setShowScans(next)
+    setShowGuides(next)
+  }, [anyVisible, setShowScans, setShowGuides])
+
+  return (
+    <Popover onOpenChange={setIsOpen} open={isOpen}>
+      <div className="flex items-center">
+        <ActionButton
+          className={cn(
+            'rounded-r-none p-0',
+            anyVisible
+              ? 'bg-white/15'
+              : 'opacity-60 grayscale hover:bg-white/5 hover:opacity-100 hover:grayscale-0',
+          )}
+          label={`References: ${anyVisible ? 'Visible' : 'Hidden'}`}
+          onClick={toggleAll}
+          size="icon"
+          variant="ghost"
+        >
+          <div className="relative">
+            <img
+              alt="References"
+              className="h-[28px] w-[28px] object-contain"
+              src="/icons/floorplan.webp"
+            />
+            <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-white/20 px-[3px] text-center font-medium text-[9px] text-white/70 leading-[14px]">
+              {total}
+            </span>
+          </div>
+        </ActionButton>
+
+        <PopoverTrigger asChild>
+          <button
+            aria-expanded={isOpen}
+            aria-label="Reference settings"
+            className={cn(
+              'flex h-11 w-6 items-center justify-center rounded-r-lg transition-colors',
+              anyVisible
+                ? isOpen
+                  ? 'bg-white/10'
+                  : 'bg-white/5 hover:bg-white/8'
+                : isOpen
+                  ? 'bg-white/8'
+                  : 'opacity-60 hover:bg-white/5 hover:opacity-100',
+            )}
+            type="button"
+          >
+            <ChevronDown className={cn('h-3 w-3 transition-transform', isOpen && 'rotate-180')} />
+          </button>
+        </PopoverTrigger>
+      </div>
+
+      <PopoverContent
+        align="center"
+        className="w-72 rounded-xl border-border/45 bg-background/96 p-3 shadow-elevation-3 backdrop-blur-xl"
+        side="top"
+        sideOffset={14}
+      >
+        <div className="space-y-3">
+          {uploadError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-destructive text-xs">
+              {uploadError}
+            </div>
+          )}
+          <ReferenceListSection
+            emptyText={REFERENCES_EMPTY_TEXT}
+            iconSrc="/icons/mesh.webp"
+            nodes={scans}
+            noun="scan"
+            onError={setUploadError}
+            setShow={setShowScans}
+            show={showScans}
+            title="Scans"
+          />
+          <div className="h-px bg-border/45" />
+          <ReferenceListSection
+            emptyText={REFERENCES_EMPTY_TEXT}
+            iconSrc="/icons/floorplan.webp"
+            nodes={guides}
+            noun="guide image"
+            onError={setUploadError}
+            setShow={setShowGuides}
+            show={showGuides}
+            title="Guide images"
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+// ── Reference floor control ────────────────────────────────────────────────────────────────────
 
 function ReferenceFloorControl() {
   const showReferenceFloor = useEditor((state) => state.showReferenceFloor)
@@ -694,7 +853,11 @@ function ReferenceFloorControl() {
               onClick={toggleReferenceFloor}
               type="button"
             >
-              {showReferenceFloor ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              {showReferenceFloor ? (
+                <Eye className="h-3.5 w-3.5" />
+              ) : (
+                <EyeOff className="h-3.5 w-3.5" />
+              )}
             </button>
           </div>
 
@@ -728,9 +891,7 @@ function ReferenceFloorControl() {
                         )}
                       />
                       <span className="min-w-0 flex-1 truncate">{levelName}</span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {index + 1} below
-                      </span>
+                      <span className="text-[10px] text-muted-foreground">{index + 1} below</span>
                     </button>
                   )
                 })}
@@ -757,30 +918,46 @@ function ReferenceFloorControl() {
   )
 }
 
-// ── Main ViewToggles ────────────────────────────────────────────────────────
+// ── Riser diagram control ────────────────────────────────────────────────────
 
-export function ViewToggles() {
+function RiserControl() {
+  const isRiserOpen = useEditor((state) => state.isRiserOpen)
+  const toggleRiserOpen = useEditor((state) => state.toggleRiserOpen)
+
+  return (
+    <ActionButton
+      className={cn(
+        isRiserOpen
+          ? 'bg-white/15'
+          : 'opacity-60 grayscale hover:bg-white/5 hover:opacity-100 hover:grayscale-0',
+      )}
+      label="Riser diagram"
+      onClick={toggleRiserOpen}
+      size="icon"
+      variant="ghost"
+    >
+      <Waypoints className="h-4 w-4" />
+    </ActionButton>
+  )
+}
+
+// ── Exports ─────────────────────────────────────────────────────────────────
+
+export function SecondaryToggles() {
   return (
     <div className="flex items-center gap-1">
-      {/* Scans (toggle + dropdown) */}
-      <ScansControl />
-
-      {/* Guides (toggle + dropdown) */}
-      <GuidesControl />
-
-      <ReferenceFloorControl />
+      <ReferencesControl />
     </div>
   )
 }
 
-// Secondary toggles for mobile (grid snap + scans + guides)
-export function SecondaryToggles() {
+export function ViewToggles() {
   return (
     <div className="flex items-center gap-1">
-      <GridSnapControl />
       <ScansControl />
       <GuidesControl />
       <ReferenceFloorControl />
+      <RiserControl />
     </div>
   )
 }

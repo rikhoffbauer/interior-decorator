@@ -22,11 +22,13 @@ import {
   type AnyNode,
   type AnyNodeId,
   type BuildingNode,
+  DEFAULT_LEVEL_HEIGHT,
+  getStoredLevelHeight,
   LevelNode,
   useScene,
 } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
-import { Copy, GripVertical, MoreVertical, Plus, Trash2 } from 'lucide-react'
+import { markPerfAction, useViewer } from '@pascal-app/viewer'
+import { ClipboardPaste, Copy, GripVertical, MoreVertical, Plus, Trash2 } from 'lucide-react'
 import {
   type ButtonHTMLAttributes,
   type CSSProperties,
@@ -36,12 +38,17 @@ import {
   useState,
 } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { pasteSelectionAndPickUp } from '../editor/group-actions'
 import {
   buildLevelDuplicateCreateOps,
   type LevelDuplicatePreset,
 } from '../../lib/level-duplication'
+import { getDefaultLevelName, getLevelDisplayName } from '@pascal-app/core'
 import { deleteLevelWithFallbackSelection } from '../../lib/level-selection'
+import { useLinearDisplay } from '../../lib/use-linear-display'
 import { cn } from '../../lib/utils'
+import { ActionButton } from './controls/action-button'
+import { SliderControl } from './controls/slider-control'
 import { LevelDuplicateDialog } from './level-duplicate-dialog'
 import {
   Dialog,
@@ -52,10 +59,6 @@ import {
   DialogTitle,
 } from './primitives/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from './primitives/popover'
-
-function getLevelDisplayLabel(level: LevelNode) {
-  return level.name || `Level ${level.level}`
-}
 
 // ── Inline rename input for a level row ─────────────────────────────────────
 
@@ -69,7 +72,7 @@ function LevelInlineRename({
   onStopEditing: () => void
 }) {
   const updateNode = useScene((s) => s.updateNode)
-  const defaultName = `Level ${level.level}`
+  const defaultName = getDefaultLevelName(level.level)
   const [value, setValue] = useState(level.name || '')
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -126,6 +129,7 @@ function LevelRow({
   dragHandleRef,
   onSelect,
   onDuplicate,
+  onPaste,
   onRequestDelete,
 }: {
   level: LevelNode
@@ -135,10 +139,34 @@ function LevelRow({
   dragHandleRef?: (element: HTMLButtonElement | null) => void
   onSelect: () => void
   onDuplicate: (preset?: LevelDuplicatePreset) => void
+  onPaste?: () => void
   onRequestDelete: () => void
 }) {
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const updateNode = useScene((s) => s.updateNode)
+  const { isImperial, toDisplay, displayUnit } = useLinearDisplay('m', 2)
+
+  const storeyHeight = getStoredLevelHeight(level)
+  // toFixed(2) + strip one trailing zero: "2.50" → "2.5", "2.75" stays.
+  const storeyHeightLabel = `${toDisplay(storeyHeight).toFixed(2).replace(/0$/, '')} ${displayUnit}`
+  // Same rule as the site panel and command palette: the ordinal-0 ground
+  // floor is the vertical model's zero anchor and must never be deletable.
+  const canDeleteLevel = level.level !== 0
+
+  // Clean preset values per display system; imperial stores exact meters
+  // for whole-foot storey heights.
+  const heightPresets = isImperial
+    ? [
+        { label: '8 ft', height: 2.4384 },
+        { label: '9 ft', height: 2.7432 },
+        { label: '10 ft', height: 3.048 },
+      ]
+    : [
+        { label: '2.5 m', height: 2.5 },
+        { label: '3.0 m', height: 3.0 },
+        { label: '3.5 m', height: 3.5 },
+      ]
 
   return (
     <div className="group/level">
@@ -160,9 +188,9 @@ function LevelRow({
         >
           <button
             {...dragHandleProps}
-            aria-label={`Reorder ${getLevelDisplayLabel(level)}`}
+            aria-label={`Reorder ${getLevelDisplayName(level)}`}
             className={cn(
-              'ml-0.5 flex h-6 w-4 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground/35 opacity-0 transition-colors hover:bg-white/5 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 group-hover/level:opacity-100',
+              'ml-0.5 flex h-6 w-4 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground/35 opacity-0 transition-colors hover:bg-white/5 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 group-hover/level:opacity-100',
               isDragging && 'cursor-grabbing opacity-100',
             )}
             onClick={(e) => {
@@ -183,11 +211,53 @@ function LevelRow({
               e.stopPropagation()
               setIsEditing(true)
             }}
-            title={getLevelDisplayLabel(level)}
+            title={getLevelDisplayName(level)}
             type="button"
           >
-            <span className="truncate">{getLevelDisplayLabel(level)}</span>
+            <span className="truncate">{getLevelDisplayName(level)}</span>
           </button>
+
+          {/* Storey height badge — opens the height popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className="mr-0.5 shrink-0 whitespace-nowrap rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground/50 tabular-nums transition-colors hover:bg-white/5 hover:text-foreground"
+                onClick={(e) => e.stopPropagation()}
+                title="Level height"
+                type="button"
+              >
+                {storeyHeightLabel}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="w-56 p-2"
+              onClick={(e) => e.stopPropagation()}
+              side="right"
+              sideOffset={8}
+            >
+              <SliderControl
+                label="Level height"
+                max={20}
+                min={1}
+                onChange={(v) => updateNode(level.id, { height: v })}
+                precision={3}
+                step={0.1}
+                unit="m"
+                value={Math.round(storeyHeight * 1000) / 1000}
+              />
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                {heightPresets.map((preset) => (
+                  <ActionButton
+                    className="h-7 px-2"
+                    key={preset.label}
+                    label={preset.label}
+                    onClick={() => updateNode(level.id, { height: preset.height })}
+                  />
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
 
           {/* Vertical three-dot menu — inside the pill */}
           <Popover>
@@ -223,12 +293,27 @@ function LevelRow({
                 <Copy className="h-3 w-3" />
                 Duplicate with options...
               </button>
+              {onPaste && (
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:bg-white/10 hover:text-foreground"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onPaste()
+                  }}
+                  type="button"
+                >
+                  <ClipboardPaste className="h-3 w-3" />
+                  Paste copied selection
+                </button>
+              )}
               <button
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-muted-foreground text-xs transition-colors hover:bg-white/10 hover:text-red-400"
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-muted-foreground text-xs transition-colors enabled:hover:bg-white/10 enabled:hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!canDeleteLevel}
                 onClick={(e) => {
                   e.stopPropagation()
                   onRequestDelete()
                 }}
+                title={canDeleteLevel ? 'Delete level' : 'The ground level cannot be deleted'}
                 type="button"
               >
                 <Trash2 className="h-3 w-3" />
@@ -256,12 +341,14 @@ function SortableLevelRow({
   isSelected,
   onSelect,
   onDuplicate,
+  onPaste,
   onRequestDelete,
 }: {
   level: LevelNode
   isSelected: boolean
   onSelect: () => void
   onDuplicate: (preset?: LevelDuplicatePreset) => void
+  onPaste?: () => void
   onRequestDelete: () => void
 }) {
   const {
@@ -291,6 +378,7 @@ function SortableLevelRow({
         isSelected={isSelected}
         level={level}
         onDuplicate={onDuplicate}
+        onPaste={onPaste}
         onRequestDelete={onRequestDelete}
         onSelect={onSelect}
       />
@@ -344,6 +432,7 @@ export function FloatingLevelSelector() {
     const maxLevel = levels.length > 0 ? Math.max(...levels.map((l) => l.level)) : -1
     const newLevel = LevelNode.parse({
       level: maxLevel + 1,
+      height: DEFAULT_LEVEL_HEIGHT,
       children: [],
       parentId: resolvedBuildingId,
     })
@@ -356,6 +445,7 @@ export function FloatingLevelSelector() {
     const minLevel = levels.length > 0 ? Math.min(...levels.map((l) => l.level)) : 1
     const newLevel = LevelNode.parse({
       level: minLevel - 1,
+      height: DEFAULT_LEVEL_HEIGHT,
       children: [],
       parentId: resolvedBuildingId,
     })
@@ -382,6 +472,7 @@ export function FloatingLevelSelector() {
 
       const newLevel = LevelNode.parse({
         level: newLevelNumber,
+        height: DEFAULT_LEVEL_HEIGHT,
         children: [],
         parentId: resolvedBuildingId,
       })
@@ -423,6 +514,10 @@ export function FloatingLevelSelector() {
     },
     [createNodes, levels, resolvedBuildingId, setSelection, updateNodes],
   )
+
+  const handlePasteToLevel = useCallback((level: LevelNode) => {
+    void pasteSelectionAndPickUp(level.id)
+  }, [])
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setDraggingLevelId(String(event.active.id))
@@ -482,6 +577,9 @@ export function FloatingLevelSelector() {
           {!draggingLevelId && (
             <button
               className={cn(addButtonClass, 'top-0 -translate-y-1/2')}
+              // A stable hook for host-app onboarding to point at. Static, and
+              // read only from outside: nothing here depends on it.
+              data-guide-target="level-add"
               onClick={handleAddAbove}
               title="Add level above"
               type="button"
@@ -518,19 +616,29 @@ export function FloatingLevelSelector() {
                   const showGapBelow = i < reversedLevels.length - 1
 
                   return (
-                    <div className="relative" key={level.id}>
+                    <div
+                      className="relative"
+                      // A stable hook for host-app onboarding to point at, on
+                      // the ground floor only — the one level a guide can name
+                      // without knowing the building. Static, and read only
+                      // from outside: nothing here depends on it.
+                      data-guide-target={level.level === 0 ? 'level-ground' : undefined}
+                      key={level.id}
+                    >
                       <SortableLevelRow
                         isSelected={isSelected}
                         level={level}
                         onDuplicate={(preset) => handleDuplicateLevel(level, preset)}
+                        onPaste={() => handlePasteToLevel(level)}
                         onRequestDelete={() => setDeletingLevel(level)}
-                        onSelect={() =>
+                        onSelect={() => {
+                          if (!isSelected) markPerfAction('level-switch', level.id)
                           setSelection(
                             resolvedBuildingId
                               ? { buildingId: resolvedBuildingId, levelId: level.id }
                               : { levelId: level.id },
                           )
-                        }
+                        }}
                       />
 
                       {showGapBelow && !draggingLevelId && (
@@ -559,7 +667,7 @@ export function FloatingLevelSelector() {
             <DialogTitle>Delete level</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete{' '}
-              <strong>{deletingLevel ? getLevelDisplayLabel(deletingLevel) : ''}</strong>? All
+              <strong>{deletingLevel ? getLevelDisplayName(deletingLevel) : ''}</strong>? All
               walls, floors, and objects on this level will be permanently removed.
             </DialogDescription>
           </DialogHeader>

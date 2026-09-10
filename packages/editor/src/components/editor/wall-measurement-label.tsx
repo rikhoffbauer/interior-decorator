@@ -1,10 +1,11 @@
 'use client'
 
 import {
+  type AnyNode,
   type AnyNodeId,
   calculateLevelMiters,
-  DEFAULT_WALL_HEIGHT,
   getWallCurveLength,
+  getWallEffectiveHeightForNodes,
   getWallMiterBoundaryPoints,
   getWallPlanFootprint,
   getWallSurfacePolygon,
@@ -18,11 +19,12 @@ import {
   type WallMiterData,
   type WallNode,
 } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
 import { createPortal, useFrame } from '@react-three/fiber'
 import { useMemo, useState } from 'react'
 import * as THREE from 'three'
+import { formatLinearMeasurement } from '../../lib/measurements'
 
 const GUIDE_Y_OFFSET = 0.08
 const LABEL_LIFT = 0.08
@@ -32,6 +34,12 @@ const HEIGHT_TICK_HALF_LENGTH = 0.14
 const HEIGHT_GUIDE_OUTSIDE_OFFSET = 0.16
 
 const BAR_AXIS = new THREE.Vector3(0, 1, 0)
+// Shared unit cube — each MeasurementBar scales it to BAR_THICKNESS × length
+// × BAR_THICKNESS instead of constructing a fresh BoxGeometry every frame.
+// Per-frame `<boxGeometry args={[..., length, ...]}/>` triggers R3F to
+// rebuild the geometry whenever the wall moves, and the WebGPU backend
+// flags the in-flight buffer churn as "Vertex buffer slot N ... was not set".
+const SHARED_BAR_GEOMETRY = new THREE.BoxGeometry(1, 1, 1)
 
 type Vec3 = [number, number, number]
 
@@ -56,25 +64,13 @@ type WallFaceLine = {
   end: Point2D
 }
 
-function formatMeasurement(value: number, unit: 'metric' | 'imperial') {
-  if (unit === 'imperial') {
-    const feet = value * 3.280_84
-    const wholeFeet = Math.floor(feet)
-    const inches = Math.round((feet - wholeFeet) * 12)
-    if (inches === 12) return `${wholeFeet + 1}'0"`
-    return `${wholeFeet}'${inches}"`
-  }
-  return `${Number.parseFloat(value.toFixed(2))}m`
-}
-
 export function WallMeasurementLabel() {
   const selectedIds = useViewer((state) => state.selection.selectedIds)
   const nodes = useScene((state) => state.nodes)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
   const selectedNode = selectedId ? nodes[selectedId as AnyNodeId] : null
-  const measurableNode =
-    selectedNode?.type === 'wall' || selectedNode?.type === 'item' ? selectedNode : null
+  const measurableNode = selectedNode?.type === 'item' ? selectedNode : null
 
   const [objectState, setObjectState] = useState<{
     id: AnyNodeId
@@ -96,10 +92,7 @@ export function WallMeasurementLabel() {
   return createPortal(<SelectedMeasurementAnnotation node={measurableNode} />, selectedObject)
 }
 
-function getLevelWalls(
-  wall: WallNode,
-  nodes: Record<string, WallNode | { type: string; children?: string[] }>,
-): WallNode[] {
+function getLevelWalls(wall: WallNode, nodes: Record<string, AnyNode>): WallNode[] {
   if (!wall.parentId) return [wall]
 
   const levelNode = nodes[wall.parentId as AnyNodeId]
@@ -313,7 +306,7 @@ function getCurvedWallMeasurementPath(
 
 function buildMeasurementGuide(
   wall: WallNode,
-  nodes: Record<string, WallNode | { type: string; children?: string[] }>,
+  nodes: Record<string, AnyNode>,
 ): MeasurementGuide | null {
   const levelWalls = getLevelWalls(wall, nodes)
   const miterData = calculateLevelMiters(levelWalls)
@@ -322,7 +315,7 @@ function buildMeasurementGuide(
   const measurementPoints = measurementLine ?? fallbackMiddlePoints
   if (!measurementPoints) return null
 
-  const height = wall.height ?? DEFAULT_WALL_HEIGHT
+  const height = getWallEffectiveHeightForNodes(wall, nodes)
   const startLocal = worldPointToWallLocal(wall, measurementPoints.start)
   const endLocal = worldPointToWallLocal(wall, measurementPoints.end)
   const curvedMeasurementPath = isCurvedWall(wall)
@@ -447,11 +440,12 @@ function MeasurementBar({ start, end, color }: { start: Vec3; end: Vec3; color: 
 
   return (
     <mesh
+      geometry={SHARED_BAR_GEOMETRY}
       position={[segment.position.x, segment.position.y, segment.position.z]}
       quaternion={segment.quaternion}
       renderOrder={1000}
+      scale={[BAR_THICKNESS, segment.length, BAR_THICKNESS]}
     >
-      <boxGeometry args={[BAR_THICKNESS, segment.length, BAR_THICKNESS]} />
       <meshBasicMaterial
         color={color}
         depthTest={false}
@@ -515,20 +509,13 @@ function SelectedMeasurementAnnotation({ node }: { node: WallNode | ItemNode }) 
 
 function WallMeasurementAnnotation({ wall }: { wall: WallNode }) {
   const nodes = useScene((state) => state.nodes)
-  const theme = useViewer((state) => state.theme)
   const unit = useViewer((state) => state.unit)
-  const isNight = theme === 'dark'
+  const metricNotation = useViewer((state) => state.metricNotation)
+  const isNight = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
   const color = isNight ? '#ffffff' : '#111111'
   const shadowColor = isNight ? '#111111' : '#ffffff'
 
-  const guide = useMemo(
-    () =>
-      buildMeasurementGuide(
-        wall,
-        nodes as Record<string, WallNode | { type: string; children?: string[] }>,
-      ),
-    [nodes, wall],
-  )
+  const guide = useMemo(() => buildMeasurementGuide(wall, nodes), [nodes, wall])
   const length = useMemo(() => {
     if (!guide?.guidePath?.length || guide.guidePath.length < 2) {
       return getWallCurveLength(wall)
@@ -542,8 +529,9 @@ function WallMeasurementAnnotation({ wall }: { wall: WallNode }) {
     }
     return total
   }, [guide, wall])
-  const label = formatMeasurement(length, unit)
-  const heightLabel = `H ${formatMeasurement(wall.height ?? DEFAULT_WALL_HEIGHT, unit)}`
+  const label = formatLinearMeasurement(length, unit, metricNotation)
+  const height = useMemo(() => getWallEffectiveHeightForNodes(wall, nodes), [nodes, wall])
+  const heightLabel = `H ${formatLinearMeasurement(height, unit, metricNotation)}`
 
   if (!(guide && Number.isFinite(length) && length >= 0.01)) return null
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useViewer } from '@pascal-app/viewer'
+import { getSceneTheme, useViewer } from '@pascal-app/viewer'
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import useEditor from '../../store/use-editor'
 import { MobileTabBar } from '../ui/sidebar/mobile-tab-bar'
@@ -56,8 +56,8 @@ export function EditorLayoutMobile({
   const activePanel = useEditor((s) => s.activeSidebarPanel)
   const setActivePanel = useEditor((s) => s.setActiveSidebarPanel)
   const panelSheetHeight = useEditor((s) => s.mobilePanelSheetHeight)
-  const theme = useViewer((s) => s.theme)
-  const viewerBg = theme === 'light' ? VIEWER_BG_LIGHT : VIEWER_BG_DARK
+  const isDark = useViewer((s) => getSceneTheme(s.sceneTheme).appearance === 'dark')
+  const viewerBg = isDark ? VIEWER_BG_DARK : VIEWER_BG_LIGHT
 
   const middleRef = useRef<HTMLDivElement>(null)
   const sheetRef = useRef<BottomSheetHandle>(null)
@@ -83,18 +83,18 @@ export function EditorLayoutMobile({
   //   desktop "Furnish" action which itself opens the Items panel).
   // - Leaving Items while still furnishing exits the build mode.
   useEffect(() => {
-    const { phase, mode, setMode, setPhase } = useEditor.getState()
+    const { armToolMode, phase, mode, setPhase } = useEditor.getState()
     if (activePanel === 'ai' && mode === 'build') {
-      setMode('select')
+      armToolMode({ mode: 'select' })
       return
     }
     if (activePanel === 'items') {
       if (phase !== 'furnish') setPhase('furnish')
-      if (mode !== 'build') setMode('build')
+      if (mode !== 'build') armToolMode({ mode: 'build', tool: 'item' })
       return
     }
     if (phase === 'furnish' && mode === 'build') {
-      setMode('select')
+      armToolMode({ mode: 'select' })
     }
   }, [activePanel])
 
@@ -159,6 +159,11 @@ export function EditorLayoutMobile({
       const expandedThreshold = Math.max(SHEET_HANDLE_PX, defaultPx * 0.5)
       if (current > expandedThreshold) {
         sheetRef.current?.snapTo(SHEET_HANDLE_PX)
+        // Closing the sheet disarms any build tool back to select
+        const { armToolMode, mode } = useEditor.getState()
+        if (mode === 'build') {
+          armToolMode({ mode: 'select' })
+        }
       } else {
         sheetRef.current?.snapTo(defaultPx)
       }

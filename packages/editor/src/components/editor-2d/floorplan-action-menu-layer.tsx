@@ -2,6 +2,11 @@
 
 import { memo, type MouseEvent as ReactMouseEvent } from 'react'
 import useEditor from '../../store/use-editor'
+import {
+  useEndpointReshape,
+  useIsCurveReshape,
+  useMovingNode,
+} from '../../store/use-interaction-scope'
 import { NodeActionMenu } from '../editor/node-action-menu'
 
 type SvgPoint = {
@@ -14,12 +19,14 @@ export type FloorplanActionMenuHandler = (event: ReactMouseEvent<HTMLButtonEleme
 export type FloorplanActionMenuEntry = {
   position: SvgPoint | null
   onDelete: FloorplanActionMenuHandler
-  onMove: FloorplanActionMenuHandler
+  onMove?: FloorplanActionMenuHandler
   onAddHole?: FloorplanActionMenuHandler
+  onCurve?: FloorplanActionMenuHandler
   onDuplicate?: FloorplanActionMenuHandler
 }
 
 type FloorplanActionMenuLayerProps = {
+  elevator: FloorplanActionMenuEntry
   item: FloorplanActionMenuEntry
   wall: FloorplanActionMenuEntry
   fence: FloorplanActionMenuEntry
@@ -33,6 +40,7 @@ type FloorplanActionMenuLayerProps = {
 }
 
 export const FloorplanActionMenuLayer = memo(function FloorplanActionMenuLayer({
+  elevator,
   item,
   wall,
   fence,
@@ -45,16 +53,16 @@ export const FloorplanActionMenuLayer = memo(function FloorplanActionMenuLayer({
   offsetY = 10,
 }: FloorplanActionMenuLayerProps) {
   const isFloorplanHovered = useEditor((state) => state.isFloorplanHovered)
-  const movingNode = useEditor((state) => state.movingNode)
-  const movingFenceEndpoint = useEditor((state) => state.movingFenceEndpoint)
-  const curvingWall = useEditor((state) => state.curvingWall)
-  const curvingFence = useEditor((state) => state.curvingFence)
+  const movingNode = useMovingNode()
+  const endpointReshape = useEndpointReshape()
+  const isCurveReshape = useIsCurveReshape()
 
-  if (!isFloorplanHovered || movingNode || movingFenceEndpoint || curvingWall || curvingFence) {
+  if (!isFloorplanHovered || movingNode || endpointReshape || isCurveReshape) {
     return null
   }
 
   const entries: FloorplanActionMenuEntry[] = [
+    elevator,
     item,
     wall,
     fence,
@@ -81,6 +89,7 @@ export const FloorplanActionMenuLayer = memo(function FloorplanActionMenuLayer({
           >
             <NodeActionMenu
               onAddHole={entry.onAddHole}
+              onCurve={entry.onCurve}
               onDelete={entry.onDelete}
               onDuplicate={entry.onDuplicate}
               onMove={entry.onMove}

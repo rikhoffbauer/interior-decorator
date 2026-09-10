@@ -45,7 +45,6 @@ function wall(
     metadata: {},
     children,
     thickness: WALL_THICKNESS,
-    height: WALL_HEIGHT,
     start,
     end,
     frontSide: 'unknown',
@@ -274,6 +273,7 @@ function buildTemplate(): SceneGraph {
     visible: true,
     metadata: {},
     level: 0,
+    height: WALL_HEIGHT,
     children: [
       'wall_n',
       'wall_e',
@@ -290,10 +290,6 @@ function buildTemplate(): SceneGraph {
       'zone_bed2',
     ],
   } as unknown as AnyNode
-
-  // SiteNode.children is a discriminatedUnion of BuildingNode/ItemNode objects
-  // (not string ids) per the schema — embed the full building node here.
-  ;(nodes.site_2br as unknown as { children: unknown[] }).children = [nodes.building_2br!]
 
   return {
     nodes: nodes as Record<AnyNodeId, AnyNode>,

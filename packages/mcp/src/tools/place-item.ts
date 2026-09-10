@@ -3,22 +3,25 @@ import type { AnyNodeId } from '@pascal-app/core/schema'
 import { ItemNode } from '@pascal-app/core/schema'
 import { z } from 'zod'
 import type { SceneOperations } from '../operations'
+import { ADDITIVE_TOOL_ANNOTATIONS } from './annotations'
 import { findCatalogItem } from './asset-catalog'
 import { ErrorCode, throwMcpError } from './errors'
 import { projectWorldPointToWallLocalX, wallLength } from './geometry'
-import { publishLiveSceneSnapshot } from './live-sync'
+import { liveSyncOutput, persistencePayload, publishLiveSceneSnapshot } from './live-sync'
+import { measurement } from './measurement'
 import { NodeIdSchema, Vec3Schema } from './schemas'
 
 export const placeItemInput = {
   catalogItemId: z.string().min(1),
   targetNodeId: NodeIdSchema,
   position: Vec3Schema,
-  rotation: z.number().optional(),
+  rotation: measurement('angle', 'rad', { description: 'Y-axis rotation.' }).optional(),
 }
 
 export const placeItemOutput = {
   itemId: z.string(),
   status: z.string().optional(),
+  ...liveSyncOutput,
 }
 
 export function registerPlaceItem(server: McpServer, bridge: SceneOperations): void {
@@ -27,9 +30,10 @@ export function registerPlaceItem(server: McpServer, bridge: SceneOperations): v
     {
       title: 'Place item',
       description:
-        'Place a catalog item into the scene. Target a level/slab/zone for floor items, a wall for wall-attached items, a ceiling for ceiling-attached items, or the site for outdoor items.',
+        'Place a catalog item into the scene. Target a level/slab/zone for floor items, a wall for wall-attached items, or a ceiling for ceiling-attached items. Do not target the site node directly.',
       inputSchema: placeItemInput,
       outputSchema: placeItemOutput,
+      annotations: ADDITIVE_TOOL_ANNOTATIONS,
     },
     async ({ catalogItemId, targetNodeId, position, rotation }) => {
       const target = bridge.getNode(targetNodeId as AnyNodeId)
@@ -42,12 +46,11 @@ export function registerPlaceItem(server: McpServer, bridge: SceneOperations): v
         targetType !== 'slab' &&
         targetType !== 'zone' &&
         targetType !== 'wall' &&
-        targetType !== 'ceiling' &&
-        targetType !== 'site'
+        targetType !== 'ceiling'
       ) {
         throwMcpError(
           ErrorCode.InvalidRequest,
-          `Cannot place item on ${targetType}; target must be a level, slab, zone, wall, ceiling, or site`,
+          `Cannot place item on ${targetType}; target must be a level, slab, zone, wall, or ceiling. Site-level placement is not supported yet because site.children is reserved for buildings.`,
         )
       }
 
@@ -97,10 +100,11 @@ export function registerPlaceItem(server: McpServer, bridge: SceneOperations): v
         ...wallExtras,
       })
       const id = bridge.createNode(item, parentId as AnyNodeId)
-      await publishLiveSceneSnapshot(bridge, 'place_item')
+      const persistence = await publishLiveSceneSnapshot(bridge, 'place_item')
       const payload = {
         itemId: id as string,
         status: catalogAsset ? 'ok' : 'catalog_unavailable',
+        ...persistencePayload(persistence),
       }
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
